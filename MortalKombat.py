@@ -1,14 +1,14 @@
 import retro
 import gym
 import numpy as np
-from Utilities import ProcessFrame
+from Utilities import PreprocessFrame
 
 
 class Discretizer(gym.ActionWrapper):
 
     def __init__(self, env):
         super(Discretizer, self).__init__(env)
-        buttons = ["B", "Y", "SELECT", "START", "UP", "DOWN", "LEFT", "RIGHT", "A", "X", "L", "R"]
+        buttons = ['B', 'Y', 'SELECT', 'START', 'UP', 'DOWN', 'LEFT', 'RIGHT', 'A', 'X', 'L', 'R']
         actions = [['A'], ['B'], ['X'], ['Y'], ['UP'], ['DOWN'], ['LEFT'], ['RIGHT'], ['L']]
         self._actions = []
         for action in actions:
@@ -26,7 +26,7 @@ class Environment:
 
     def __init__(self, game, state, frame_height, frame_width):
         self.env = Discretizer(retro.make(game=game, state=state))
-        self.frame_processor = ProcessFrame(frame_height, frame_width)
+        self.frame_processor = PreprocessFrame(frame_height, frame_width)
         self.state = None
         self.p1_current_wins = 0
         self.p2_current_wins = 0
@@ -57,4 +57,4 @@ class Environment:
         new_state = np.append(self.state[:, :, 1:], processed_observation, axis=2)
         self.state = new_state
 
-        return processed_observation[:, :, 0], reward, done, observation
+        return processed_observation[:, :, 0], observation, reward, done
