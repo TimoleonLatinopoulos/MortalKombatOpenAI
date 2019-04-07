@@ -5,6 +5,7 @@ from Utilities import PreprocessFrame
 
 
 class Discretizer(gym.ActionWrapper):
+    """ Converts the actions available for the game environment to 9 discrete possible actions """
 
     def __init__(self, env):
         super(Discretizer, self).__init__(env)
@@ -23,6 +24,7 @@ class Discretizer(gym.ActionWrapper):
 
 
 class Environment:
+    """ Manages the game by using the Retro Environment which provides all the information needed """
 
     def __init__(self, game, state, frame_height, frame_width):
         self.env = Discretizer(retro.make(game=game, state=state))
@@ -31,6 +33,7 @@ class Environment:
         self.p1_current_wins = 0
         self.p2_current_wins = 0
 
+    # Resets the game environment
     def reset(self, sess, stacked_frames):
         observation = self.env.reset()
         self.p1_current_wins = 0
@@ -39,8 +42,10 @@ class Environment:
         processed_observation = self.frame_processor.process(sess, observation)
         self.state = np.repeat(processed_observation, stacked_frames, axis=2)
 
-    def step(self, sess, action):
-
+    # Applies the action given to the environment and returns all the current frame,
+    # reward and whether the match has finished. It also saves the current state of
+    # the game that will be used to get the next action
+    def step(self, sess, action, evaluation=False):
         observation, reward, done, info = self.env.step(action)
 
         p1_round_wins = info['p1_round_wins']
@@ -52,6 +57,10 @@ class Environment:
         if p2_round_wins > self.p2_current_wins:
             self.p2_current_wins = p2_round_wins
             reward -= 100.0
+
+        if not evaluation:
+            if p1_round_wins == 1 or p2_round_wins == 1:
+                done = True
 
         processed_observation = self.frame_processor.process(sess, observation)
         new_state = np.append(self.state[:, :, 1:], processed_observation, axis=2)

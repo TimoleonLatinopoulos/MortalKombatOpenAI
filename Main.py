@@ -6,7 +6,6 @@ from MortalKombat import Environment
 from DDQN import DDQN, TargetNetworkUpdater
 from Hyperparameters import *
 
-
 os.makedirs(SAVER, exist_ok=True)
 os.makedirs(SUMMARIES, exist_ok=True)
 os.makedirs(SAVER, exist_ok=True)
@@ -18,16 +17,15 @@ tf.reset_default_graph()
 snes = Environment(GAME, STATE, FRAME_HEIGHT, FRAME_WIDTH)
 
 with tf.variable_scope('mainDQN'):
-    MAIN_DQN = DDQN(snes.env.action_space.n, HIDDEN_LAYER, FRAME_HEIGHT, FRAME_WIDTH, STACKED_FRAMES, LEARNING_RATE)
+    MAIN_DQN = DDQN(snes.env.action_space.n, FRAME_HEIGHT, FRAME_WIDTH, STACKED_FRAMES, LEARNING_RATE)
 with tf.variable_scope('targetDQN'):
-    TARGET_DQN = DDQN(snes.env.action_space.n, HIDDEN_LAYER, FRAME_HEIGHT, FRAME_WIDTH, STACKED_FRAMES, LEARNING_RATE)
+    TARGET_DQN = DDQN(snes.env.action_space.n, FRAME_HEIGHT, FRAME_WIDTH, STACKED_FRAMES, LEARNING_RATE)
 
 init = tf.global_variables_initializer()
 saver = tf.train.Saver()
 
 MAIN_DQN_VARS = tf.trainable_variables(scope='mainDQN')
 TARGET_DQN_VARS = tf.trainable_variables(scope='targetDQN')
-LAYER_IDS = ["conv1", "conv2", "conv3", "conv4", "denseAdvantage", "denseAdvantageBias", "denseValue", "denseValueBias"]
 
 # Loss, reward and evaluation score
 with tf.name_scope('Performance'):
@@ -39,15 +37,6 @@ with tf.name_scope('Performance'):
     EVAL_SCORE_SUMMARY = tf.summary.scalar('evaluation_score', EVAL_SCORE_PH)
 
 PERFORMANCE_SUMMARIES = tf.summary.merge([LOSS_SUMMARY, REWARD_SUMMARY])
-
-# Histogram summaries
-with tf.name_scope('Parameters'):
-    ALL_PARAM_SUMMARIES = []
-    for i, Id in enumerate(LAYER_IDS):
-        with tf.name_scope('mainDQN/'):
-            MAIN_DQN_KERNEL = tf.summary.histogram(Id, tf.reshape(MAIN_DQN_VARS[i], shape=[-1]))
-        ALL_PARAM_SUMMARIES.extend([MAIN_DQN_KERNEL])
-PARAM_SUMMARIES = tf.summary.merge(ALL_PARAM_SUMMARIES)
 
 
 def learn(session, replay_memory, main_dqn, target_dqn, batch_size, gamma):
@@ -80,18 +69,20 @@ def train():
             print("Model restored.")
             with open("last_frame.dat") as file:
                 frame_number = int(file.readline())
+                episodes = int(file.readline())
         else:
             sess.run(init)
             WRITER.add_graph(sess.graph)
             frame_number = 0
-        beginning_frame = frame_number
+            episodes = 0
+        beginning_episode = episodes
         rewards = []
         loss_list = []
 
-        while frame_number < MAX_FRAMES:
-            epoch_frame = 0
+        while episodes < MAX_EPISODES:
+            epoch_episodes = 0
 
-            while epoch_frame < EPOCH_FRAMES:
+            while epoch_episodes < EPOCH_EPISODES:
                 snes.reset(sess, STACKED_FRAMES)
                 reward_sum = 0
 
@@ -99,84 +90,86 @@ def train():
                     action = action_getter.get_action(sess, frame_number, MAIN_DQN, snes.state)
                     observation, _, reward, done = snes.step(sess, action)
                     frame_number += 1
-                    epoch_frame += 1
                     reward_sum += reward
 
                     my_replay_memory.add_experience(observation=observation, action=action, reward=reward, done=done)
 
-                    if frame_number % STACKED_FRAMES == 0 and frame_number > REPLAY_MEMORY_START + beginning_frame:
-                        loss = learn(sess, my_replay_memory, MAIN_DQN, TARGET_DQN, BATCH_SIZE, GAMMA)
-                        loss_list.append(loss)
-                    if frame_number % UPDATE_FRAMES == 0 and frame_number > REPLAY_MEMORY_START + beginning_frame:
-                        network_updater.update_networks(sess)
+                    if episodes > REPLAY_MEMORY_START + beginning_episode:
+                        if frame_number % STACKED_FRAMES == 0:
+                            loss = learn(sess, my_replay_memory, MAIN_DQN, TARGET_DQN, BATCH_SIZE, GAMMA)
+                            loss_list.append(loss)
+                        if frame_number % UPDATE_FRAMES == 0:
+                            network_updater.update_networks(sess)
                     if done:
                         break
 
+                epoch_episodes += 1
+                episodes += 1
                 rewards.append(reward_sum)
 
-                # Output the progress:
-                if len(rewards) % 10 == 0:
+                # Output the progress
+                if episodes % SAVE_STEP == 0:
                     # Scalar summaries for tensorboard
-                    if frame_number > REPLAY_MEMORY_START + beginning_frame:
+                    if episodes > REPLAY_MEMORY_START + beginning_episode:
                         summ = sess.run(PERFORMANCE_SUMMARIES,
-                                        feed_dict={LOSS_PH: np.mean(loss_list),
-                                                   REWARD_PH: np.mean(rewards[-100:])})
-
-                        WRITER.add_summary(summ, frame_number)
+                                        feed_dict={LOSS_PH: np.mean(loss_list), REWARD_PH: np.mean(rewards)})
+                        WRITER.add_summary(summ, episodes)
                         loss_list = []
-                    # Histogramm summaries for tensorboard
-                    summ_param = sess.run(PARAM_SUMMARIES)
-                    WRITER.add_summary(summ_param, frame_number)
 
-                    print(len(rewards), frame_number, np.mean(rewards[-100:]))
+                    print(episodes, frame_number, np.mean(rewards))
                     with open('rewards.dat', 'a') as reward_file:
-                        print(len(rewards), frame_number, np.mean(rewards[-100:]), file=reward_file)
+                        print(episodes, frame_number, np.mean(rewards), file=reward_file)
+                    rewards = []
 
             print("Evaluating...")
             done = True
             gif = True
-            episodes = 0
+            eval_episodes = 0
             reward_sum = 0
             frames_for_gif = []
             eval_rewards = []
 
-            while episodes < EVAL_REPLAYS:
+            while eval_episodes < EVAL_REPLAYS:
                 if done:
                     snes.reset(sess, STACKED_FRAMES)
                     reward_sum = 0
 
                 action = action_getter.get_action(sess, frame_number, MAIN_DQN, snes.state, evaluation=True)
-                processed_observation, observation, reward, done  = snes.step(sess, action)
+                processed_observation, observation, reward, done = snes.step(sess, action, evaluation=True)
                 reward_sum += reward
 
                 if gif:
                     frames_for_gif.append(observation)
                 if done:
-                    episodes += 1
+                    eval_episodes += 1
                     eval_rewards.append(reward_sum)
                     gif = False
 
             print("Average score in {} replays: {}".format(EVAL_REPLAYS, np.mean(eval_rewards)))
 
             # Save the network parameters
-            save_path = saver.save(sess, SAVER + SAVED_FILE_NAME)
+            if np.mean(eval_rewards) > 0:
+                save_path = saver.save(sess, SAVER + SAVED_FILE_NAME_SUCCESS)
+            else:
+                save_path = saver.save(sess, SAVER + SAVED_FILE_NAME)
             print("Model saved in path: {}".format(save_path))
 
             with open('last_frame.dat', 'a') as file:
                 file.truncate(0)
-                print(frame_number, file=file)
+                print(frame_number, episodes, sep='\n', file=file)
 
             try:
                 print("Making gif...")
-                generate_gif(frame_number, eval_rewards[0], frames_for_gif, GIF)
+                generate_gif(episodes, eval_rewards[0], frames_for_gif, GIF)
+                print("Gif generated in path: " + GIF)
             except IndexError:
                 print("No evaluation game finished")
 
             # Show the evaluation score in tensorboard
             summ = sess.run(EVAL_SCORE_SUMMARY, feed_dict={EVAL_SCORE_PH: np.mean(eval_rewards)})
-            WRITER.add_summary(summ, frame_number)
+            WRITER.add_summary(summ, episodes)
             with open('rewardsEval.dat', 'a') as eval_reward_file:
-                print(frame_number, np.mean(eval_rewards), file=eval_reward_file)
+                print(episodes, np.mean(eval_rewards), file=eval_reward_file)
 
 
 def test():
@@ -192,16 +185,20 @@ def test():
         while True:
             snes.env.render()
             action = action_getter.get_action(sess, 0, MAIN_DQN, snes.state, evaluation=True)
-            processed_new_frame, new_frame, reward, done = snes.step(sess, action)
+            processed_new_frame, new_frame, reward, done = snes.step(sess, action, evaluation=True)
             reward_sum += reward
             frames_for_gif.append(new_frame)
             if done:
                 break
-
         snes.env.close()
+
         print("Reward: {}".format(reward_sum))
-        print("Making gif...")
-        generate_gif(0, reward_sum, frames_for_gif, GIF)
+        try:
+            print("Making gif...")
+            generate_gif(0, reward_sum, frames_for_gif, GIF)
+            print("Gif generated in path: " + GIF)
+        except IndexError:
+            print("No evaluation game finished")
 
 
 if TRAIN:

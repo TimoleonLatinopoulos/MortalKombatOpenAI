@@ -5,15 +5,17 @@ import tensorflow as tf
 
 
 # Generates a gif from an array of frames and saves it to the path given
-def generate_gif(number, reward, frames, path):
+def generate_gif(episodes, reward, frames, path):
     for i, frame in enumerate(frames):
         frames[i] = frame
-    imageio.mimsave(f'{path}{"MortalKombat_frame{}_reward_{}.gif".format(number, reward)}', frames, duration=1 / 60)
+    pathname = path + "Episode " + str(episodes) + "  Reward " + str(reward) + ".gif"
+    imageio.mimsave(pathname, frames, duration=1 / 60)
 
 
 class ReplayMemory:
     """ Stores transitions of states from the Retro Environment """
-    def __init__(self, frame_height=82, frame_width=128, stacked_frames=4, batch_size=32, memory_size=1000000):
+
+    def __init__(self, frame_height=82, frame_width=128, stacked_frames=4, batch_size=32, memory_size=500000):
         self.frame_height = frame_height
         self.frame_width = frame_width
         self.stacked_frames = stacked_frames
@@ -84,6 +86,7 @@ class ReplayMemory:
 
 class ActionGetter:
     """ Returns either a random action or the predicted action from the Q-network based on an annealing value """
+
     def __init__(self, n_actions, e_start=1, e_end=0.1, replay_memory_start=50000, e_annealing_frames=1000000):
         self.n_actions = n_actions
         self.e_start = e_start
