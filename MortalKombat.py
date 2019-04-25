@@ -53,10 +53,10 @@ class Environment:
 
         if p1_round_wins > self.p1_current_wins:
             self.p1_current_wins = p1_round_wins
-            reward += 100.0
+            # reward += 100.0
         if p2_round_wins > self.p2_current_wins:
             self.p2_current_wins = p2_round_wins
-            reward -= 100.0
+            # reward -= 100.0
 
         if not evaluation:
             if p1_round_wins == 1 or p2_round_wins == 1:

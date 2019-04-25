@@ -75,7 +75,7 @@ def train():
             WRITER.add_graph(sess.graph)
             frame_number = 0
             episodes = 0
-        beginning_episode = episodes
+        beginning_frame = frame_number
         rewards = []
         loss_list = []
 
@@ -94,7 +94,7 @@ def train():
 
                     my_replay_memory.add_experience(observation=observation, action=action, reward=reward, done=done)
 
-                    if episodes > REPLAY_MEMORY_START + beginning_episode:
+                    if frame_number > REPLAY_MEMORY_START + beginning_frame:
                         if frame_number % STACKED_FRAMES == 0:
                             loss = learn(sess, my_replay_memory, MAIN_DQN, TARGET_DQN, BATCH_SIZE, GAMMA)
                             loss_list.append(loss)
@@ -105,12 +105,13 @@ def train():
 
                 epoch_episodes += 1
                 episodes += 1
+                print(reward_sum)
                 rewards.append(reward_sum)
 
                 # Output the progress
                 if episodes % SAVE_STEP == 0:
                     # Scalar summaries for tensorboard
-                    if episodes > REPLAY_MEMORY_START + beginning_episode:
+                    if frame_number > REPLAY_MEMORY_START + beginning_frame:
                         summ = sess.run(PERFORMANCE_SUMMARIES,
                                         feed_dict={LOSS_PH: np.mean(loss_list), REWARD_PH: np.mean(rewards)})
                         WRITER.add_summary(summ, episodes)
@@ -128,6 +129,7 @@ def train():
             reward_sum = 0
             frames_for_gif = []
             eval_rewards = []
+            p1_round_wins = 0
 
             while eval_episodes < EVAL_REPLAYS:
                 if done:
@@ -143,12 +145,13 @@ def train():
                 if done:
                     eval_episodes += 1
                     eval_rewards.append(reward_sum)
+                    p1_round_wins = snes.p1_current_wins
                     gif = False
 
             print("Average score in {} replays: {}".format(EVAL_REPLAYS, np.mean(eval_rewards)))
 
             # Save the network parameters
-            if np.mean(eval_rewards) > 0:
+            if p1_round_wins == 2:
                 save_path = saver.save(sess, SAVER + SAVED_FILE_NAME_SUCCESS)
             else:
                 save_path = saver.save(sess, SAVER + SAVED_FILE_NAME)
@@ -158,18 +161,24 @@ def train():
                 file.truncate(0)
                 print(frame_number, episodes, sep='\n', file=file)
 
-            try:
-                print("Making gif...")
-                generate_gif(episodes, eval_rewards[0], frames_for_gif, GIF)
-                print("Gif generated in path: " + GIF)
-            except IndexError:
-                print("No evaluation game finished")
+            if np.mean(eval_rewards) > -100:
+                try:
+                    print("Making gif...")
+                    generate_gif(episodes, eval_rewards[0], frames_for_gif, GIF)
+                    print("Gif generated in path: " + GIF)
+                except IndexError:
+                    print("No evaluation game finished")
+            else:
+                print("Not saving gif")
 
             # Show the evaluation score in tensorboard
             summ = sess.run(EVAL_SCORE_SUMMARY, feed_dict={EVAL_SCORE_PH: np.mean(eval_rewards)})
             WRITER.add_summary(summ, episodes)
             with open('rewardsEval.dat', 'a') as eval_reward_file:
                 print(episodes, np.mean(eval_rewards), file=eval_reward_file)
+
+            del frames_for_gif
+            del eval_rewards
 
 
 def test():
@@ -193,12 +202,12 @@ def test():
         snes.env.close()
 
         print("Reward: {}".format(reward_sum))
-        try:
-            print("Making gif...")
-            generate_gif(0, reward_sum, frames_for_gif, GIF)
-            print("Gif generated in path: " + GIF)
-        except IndexError:
-            print("No evaluation game finished")
+        # try:
+        #     print("Making gif...")
+        #     generate_gif(0, reward_sum, frames_for_gif, GIF)
+        #     print("Gif generated in path: " + GIF)
+        # except IndexError:
+        #     print("No evaluation game finished")
 
 
 if TRAIN:

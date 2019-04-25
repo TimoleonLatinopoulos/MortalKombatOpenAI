@@ -15,7 +15,7 @@ def generate_gif(episodes, reward, frames, path):
 class ReplayMemory:
     """ Stores transitions of states from the Retro Environment """
 
-    def __init__(self, frame_height=82, frame_width=128, stacked_frames=4, batch_size=32, memory_size=500000):
+    def __init__(self, frame_height=63, frame_width=113, stacked_frames=4, batch_size=32, memory_size=1000000):
         self.frame_height = frame_height
         self.frame_width = frame_width
         self.stacked_frames = stacked_frames
@@ -87,7 +87,7 @@ class ReplayMemory:
 class ActionGetter:
     """ Returns either a random action or the predicted action from the Q-network based on an annealing value """
 
-    def __init__(self, n_actions, e_start=1, e_end=0.1, replay_memory_start=50000, e_annealing_frames=1000000):
+    def __init__(self, n_actions, e_start=1, e_end=0.1, replay_memory_start=20000, e_annealing_frames=1000000):
         self.n_actions = n_actions
         self.e_start = e_start
         self.e_end = e_end
@@ -116,13 +116,14 @@ class ActionGetter:
 class PreprocessFrame:
     """ Resizes, crops and converts to RGB frames the Retro Environment """
 
-    def __init__(self, frame_height=82, frame_width=128):
+    def __init__(self, frame_height=63, frame_width=113):
         self.frame_height = frame_height
         self.frame_width = frame_width
         self.frame = tf.placeholder(shape=[224, 256, 3], dtype=tf.uint8)
 
         self.processed = tf.image.rgb_to_grayscale(self.frame)
-        self.processed = tf.image.crop_to_bounding_box(self.processed, 45, 0, 150, 256)
+        self.processed = tf.image.crop_to_bounding_box(self.processed, 62, 15, 126, 226)
+        # self.processed = tf.image.crop_to_bounding_box(self.processed, 50, 0, 136, 256)
         self.processed = tf.image.resize_images(self.processed, [self.frame_height, self.frame_width],
                                                 method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
 
