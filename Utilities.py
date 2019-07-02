@@ -1,4 +1,6 @@
 import random
+from os import fsync
+
 import imageio
 import numpy as np
 import tensorflow as tf
@@ -15,28 +17,36 @@ def generate_gif(episodes, reward, frames, path):
 class ReplayMemory:
     """ Stores transitions of states from the Retro Environment """
 
-    def __init__(self, frame_height=63, frame_width=113, stacked_frames=4, batch_size=32, memory_size=1000000):
+    def __init__(self, frame_height=63, frame_width=113, stacked_frames=4, batch_size=32, memory_size=900000,
+                 load_memory=False):
         self.frame_height = frame_height
         self.frame_width = frame_width
         self.stacked_frames = stacked_frames
         self.batch_size = batch_size
         self.memory_size = memory_size
 
-        self.count = 0
-        self.current = 0
+        self.filenames = {"observations", "actions", "rewards", "done", "count", "current", "states", "new_states",
+                          "indices"}
 
-        # Pre-allocate memory
-        self.observations = np.empty((self.memory_size, self.frame_height, self.frame_width), dtype=np.uint8)
-        self.actions = np.empty(self.memory_size, dtype=np.uint8)
-        self.rewards = np.empty(self.memory_size, dtype=np.int16)
-        self.done = np.empty(self.memory_size, dtype=np.bool)
+        if load_memory:
+            for filename in self.filenames:
+                setattr(self, filename, np.load("output/" + filename + ".npy"))
+        else:
+            self.count = 0
+            self.current = 0
 
-        # Minibatch memory
-        self.states = np.empty((self.batch_size, self.stacked_frames, self.frame_height, self.frame_width),
-                               dtype=np.uint8)
-        self.new_states = np.empty((self.batch_size, self.stacked_frames, self.frame_height, self.frame_width),
+            # Pre-allocate memory
+            self.observations = np.empty((self.memory_size, self.frame_height, self.frame_width), dtype=np.uint8)
+            self.actions = np.empty((self.memory_size, 3), dtype=np.uint8)
+            self.rewards = np.empty(self.memory_size, dtype=np.int16)
+            self.done = np.empty(self.memory_size, dtype=np.bool)
+
+            # Minibatch memory
+            self.states = np.empty((self.batch_size, self.stacked_frames, self.frame_height, self.frame_width),
                                    dtype=np.uint8)
-        self.indices = np.empty(self.batch_size, dtype=np.int32)
+            self.new_states = np.empty((self.batch_size, self.stacked_frames, self.frame_height, self.frame_width),
+                                       dtype=np.uint8)
+            self.indices = np.empty(self.batch_size, dtype=np.int32)
 
     # Adds a new state into the replay memory
     def add_experience(self, observation, action, reward, done):
@@ -83,20 +93,42 @@ class ReplayMemory:
         return np.transpose(self.states, axes=(0, 2, 3, 1)), np.transpose(self.new_states, axes=(0, 2, 3, 1)), \
                self.actions[self.indices], self.rewards[self.indices], self.done[self.indices]
 
+    # Saves all the replay memory on separate pickle files
+    def save_memory(self):
+        for filename in self.filenames:
+            with open("output/" + filename + ".npy", "wb+") as file:
+                np.save(file, getattr(self, filename), allow_pickle=False)
+                self.sync(file)
+
+    def sync(self, fh):
+        fh.flush()
+        fsync(fh.fileno())
+
 
 class ActionGetter:
     """ Returns either a random action or the predicted action from the Q-network based on an annealing value """
 
-    def __init__(self, n_actions, e_start=1, e_end=0.1, replay_memory_start=20000, e_annealing_frames=1000000):
-        self.n_actions = n_actions
+    def __init__(self, env, e_start=1, e_end=0.1, replay_memory_start=20000, e_annealing_frames=1000000,
+                 div_list=[1, 3, 9]):
+        self.env = env
+        self.env_shape = self.env.action_space.nvec
         self.e_start = e_start
         self.e_end = e_end
         self.replay_memory_start = replay_memory_start
         self.e_annealing_frames = e_annealing_frames
+        self.div_list = div_list
 
         # Slopes and intercepts for exploration decrease
         self.slope = -(self.e_start - self.e_end) / self.e_annealing_frames
         self.intercept = self.e_start - self.slope * self.replay_memory_start
+
+    def number_to_list(self, action):
+        result = [0, 0, 0]
+        for i in range(len(self.div_list) - 1, -1, -1):
+            div = action // self.div_list[i]
+            action = action % self.div_list[i]
+            result[i] = div
+        return result
 
     def get_action(self, session, frame_number, dqn, state, evaluation=False):
         if evaluation:
@@ -109,8 +141,8 @@ class ActionGetter:
             e = self.e_end
 
         if np.random.rand(1) < e:
-            return np.random.randint(0, self.n_actions)
-        return session.run(dqn.prediction, feed_dict={dqn.input: [state]})[0]
+            return self.env.action_space.sample()
+        return self.number_to_list(session.run(dqn.prediction, feed_dict={dqn.input: [state]})[0])
 
 
 class PreprocessFrame:
@@ -123,7 +155,6 @@ class PreprocessFrame:
 
         self.processed = tf.image.rgb_to_grayscale(self.frame)
         self.processed = tf.image.crop_to_bounding_box(self.processed, 62, 15, 126, 226)
-        # self.processed = tf.image.crop_to_bounding_box(self.processed, 50, 0, 136, 256)
         self.processed = tf.image.resize_images(self.processed, [self.frame_height, self.frame_width],
                                                 method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
 

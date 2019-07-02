@@ -1,8 +1,8 @@
 import tensorflow as tf
-from keras.losses import logcosh
 from keras.activations import relu
 from keras.initializers import VarianceScaling
 from keras.layers import Dense, Conv2D, Flatten
+from keras.losses import logcosh
 
 
 class DDQN:
@@ -23,7 +23,7 @@ class DDQN:
         self.conv1 = self.conv_layer(self.input, 32, [8, 8], 4, 'conv1')
         self.conv2 = self.conv_layer(self.conv1, 64, [4, 4], 2, 'conv2')
         self.conv3 = self.conv_layer(self.conv2, 64, [3, 3], 1, 'conv3')
-        # self.conv4 = self.conv_layer(self.conv3, 1024, [5, 5], 1, 'conv4')
+        # self.conv4 = self.conv_layer(self.conv3, 1024, [4, 4], 1, 'conv4')
         self.flat = Flatten()(self.conv3)
         self.dense1 = self.dense_layer(self.flat, 512, 'dense1', relu)
 
