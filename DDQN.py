@@ -8,7 +8,7 @@ from keras.losses import logcosh
 class DDQN:
     """ Implements a Dueling Dual Deep Q-Network based on the frames of the Retro Environment """
 
-    def __init__(self, n_actions, frame_height=64, frame_width=113, stacked_frames=4, learning_rate=0.00001):
+    def __init__(self, n_actions, frame_height=63, frame_width=113, stacked_frames=4, learning_rate=0.00001):
         self.n_actions = n_actions
         self.frame_height = frame_height
         self.frame_width = frame_width
@@ -23,15 +23,11 @@ class DDQN:
         self.conv1 = self.conv_layer(self.input, 32, [8, 8], 4, 'conv1')
         self.conv2 = self.conv_layer(self.conv1, 64, [4, 4], 2, 'conv2')
         self.conv3 = self.conv_layer(self.conv2, 64, [3, 3], 1, 'conv3')
-        # self.conv4 = self.conv_layer(self.conv3, 1024, [4, 4], 1, 'conv4')
         self.flat = Flatten()(self.conv3)
         self.dense1 = self.dense_layer(self.flat, 512, 'dense1', relu)
 
         # Splitting into value and advantage streams
-        # self.v_stream, self.a_stream = tf.split(self.conv4, 2, 3)
         self.v_stream, self.a_stream = tf.split(self.dense1, 2, 1)
-        # self.v_stream = Flatten()(self.v_stream)
-        # self.a_stream = Flatten()(self.a_stream)
         self.value = self.dense_layer(self.v_stream, 1, 'value')
         self.advantage = self.dense_layer(self.a_stream, self.n_actions, 'advantage')
 

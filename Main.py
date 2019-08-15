@@ -1,10 +1,12 @@
 import os
-import tensorflow as tf
+
 import numpy as np
-from Utilities import ReplayMemory, ActionGetter, generate_gif
-from MortalKombat import Environment
+import tensorflow as tf
+
 from DDQN import DDQN, TargetNetworkUpdater
 from Hyperparameters import *
+from MortalKombat import Environment
+from Utilities import ReplayMemory, ActionGetter, generate_gif
 
 os.makedirs(SAVER, exist_ok=True)
 os.makedirs(SUMMARIES, exist_ok=True)
@@ -16,12 +18,11 @@ tf.reset_default_graph()
 
 snes = Environment(GAME, STATE, SCENARIO, FRAME_HEIGHT, FRAME_WIDTH, FRAME_SKIP)
 
-action_space = np.prod(snes.env.action_space.nvec)
-
+n_actions = snes.env.action_space.n
 with tf.variable_scope('mainDQN'):
-    MAIN_DQN = DDQN(action_space, FRAME_HEIGHT, FRAME_WIDTH, STACKED_FRAMES, LEARNING_RATE)
+    MAIN_DQN = DDQN(n_actions, FRAME_HEIGHT, FRAME_WIDTH, STACKED_FRAMES, LEARNING_RATE)
 with tf.variable_scope('targetDQN'):
-    TARGET_DQN = DDQN(action_space, FRAME_HEIGHT, FRAME_WIDTH, STACKED_FRAMES, LEARNING_RATE)
+    TARGET_DQN = DDQN(n_actions, FRAME_HEIGHT, FRAME_WIDTH, STACKED_FRAMES, LEARNING_RATE)
 
 init = tf.global_variables_initializer()
 saver = tf.train.Saver()
@@ -41,13 +42,8 @@ with tf.name_scope('Performance'):
 PERFORMANCE_SUMMARIES = tf.summary.merge([LOSS_SUMMARY, REWARD_SUMMARY])
 
 
-def list_to_number(action):
-    return sum([x * y for (x, y) in zip(action, DIV_LIST)])
-
-
 def learn(session, replay_memory, main_dqn, target_dqn, batch_size, gamma):
     states, new_states, actions, rewards, done = replay_memory.get_batch()
-    actions = [list_to_number(a) for a in actions]
 
     arg_q_max = session.run(main_dqn.prediction, feed_dict={main_dqn.input: new_states})
 
@@ -64,7 +60,7 @@ def learn(session, replay_memory, main_dqn, target_dqn, batch_size, gamma):
 
 def train():
     network_updater = TargetNetworkUpdater(MAIN_DQN_VARS, TARGET_DQN_VARS)
-    action_getter = ActionGetter(snes.env, E_START, E_END, REPLAY_MEMORY_START, E_ANNEALING_FRAMES, DIV_LIST)
+    action_getter = ActionGetter(snes.env, E_START, E_END, REPLAY_MEMORY_START, E_ANNEALING_FRAMES)
 
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -73,7 +69,7 @@ def train():
         if LOAD_MODEL:
             my_replay_memory = ReplayMemory(FRAME_HEIGHT, FRAME_WIDTH, STACKED_FRAMES, BATCH_SIZE, MEMORY_SIZE, True)
             print("Memory Loaded.")
-            saver.restore(sess, SAVER + SAVED_FILE_NAME)
+            saver.restore(sess, SAVER + 'model' + SAVED_FILE_NAME)
             print("Model restored.")
             with open("last_frame.dat") as file:
                 frame_number = int(file.readline())
@@ -133,52 +129,48 @@ def train():
 
             print("Evaluating...")
             done = True
-            gif = True
-            eval_episodes = 0
+            result = "Lose"
             reward_sum = 0
             frames_for_gif = []
-            eval_rewards = []
             p1_round_wins = 0
 
-            while eval_episodes < EVAL_REPLAYS:
+            while True:
                 if done:
                     snes.reset(sess, STACKED_FRAMES)
                     reward_sum = 0
-
+				
                 action = action_getter.get_action(sess, frame_number, MAIN_DQN, snes.state, evaluation=True)
                 processed_observation, observation, info, reward, done = snes.step(sess, action, info, evaluation=True)
+
                 reward_sum += reward
+                frames_for_gif.append(observation)
 
-                if gif:
-                    frames_for_gif.append(observation)
                 if done:
-                    eval_episodes += 1
-                    eval_rewards.append(reward_sum)
                     p1_round_wins = snes.p1_current_wins
-                    gif = False
+                    break
 
-            print("Average score in {} replays: {}".format(EVAL_REPLAYS, np.mean(eval_rewards)))
+            print("Score in replay: {}".format(reward_sum))
 
             # Save the network parameters
             if p1_round_wins == 2:
-                save_path = saver.save(sess, SAVER + SAVED_FILE_NAME_SUCCESS + str(np.mean(eval_rewards)))
+                result = "Win"
+                save_path = saver.save(sess, SAVER + 'model_success_' + str(episodes) + SAVED_FILE_NAME)
             else:
-                save_path = saver.save(sess, SAVER + SAVED_FILE_NAME)
+                save_path = saver.save(sess, SAVER + 'model' + SAVED_FILE_NAME)
             print("Model saved in path: {}".format(save_path))
 
-            # if episodes % 500 == 0 or reward_sum > 0:
             try:
                 print("Making gif...")
-                generate_gif(episodes, eval_rewards[0], frames_for_gif, GIF)
+                generate_gif(episodes, reward_sum, result, frames_for_gif, GIF)
                 print("Gif generated in path: " + GIF)
             except IndexError:
                 print("No evaluation game finished")
 
             # Show the evaluation score in tensorboard
-            summ = sess.run(EVAL_SCORE_SUMMARY, feed_dict={EVAL_SCORE_PH: np.mean(eval_rewards)})
+            summ = sess.run(EVAL_SCORE_SUMMARY, feed_dict={EVAL_SCORE_PH: reward_sum})
             WRITER.add_summary(summ, episodes)
             with open('rewardsEval.dat', 'a') as eval_reward_file:
-                print(episodes, np.mean(eval_rewards), file=eval_reward_file)
+                print(episodes, reward_sum, file=eval_reward_file)
 
             if episodes % (EPOCH_EPISODES * 10) == 0:
                 my_replay_memory.save_memory()
@@ -187,15 +179,12 @@ def train():
                     file.truncate(0)
                     print(frame_number, episodes, sep='\n', file=file)
 
-            del frames_for_gif
-            del eval_rewards
-
 
 def test():
-    action_getter = ActionGetter(snes.env, E_START, E_END, REPLAY_MEMORY_START, E_ANNEALING_FRAMES, DIV_LIST)
+    action_getter = ActionGetter(snes.env, E_START, E_END, REPLAY_MEMORY_START, E_ANNEALING_FRAMES)
 
     with tf.Session() as sess:
-        saver.restore(sess, SAVER + SAVED_FILE_NAME)
+        saver.restore(sess, SAVER + 'model' + SAVED_FILE_NAME)
         print("Model restored.")
 
         frames_for_gif = []
@@ -215,7 +204,7 @@ def test():
         print("Reward: {}".format(reward_sum))
         try:
             print("Making gif...")
-            generate_gif(0, reward_sum, frames_for_gif, GIF)
+            generate_gif(0, reward_sum, '', frames_for_gif, GIF)
             print("Gif generated in path: " + GIF)
         except IndexError:
             print("No evaluation game finished")

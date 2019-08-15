@@ -7,10 +7,10 @@ import tensorflow as tf
 
 
 # Generates a gif from an array of frames and saves it to the path given
-def generate_gif(episodes, reward, frames, path):
+def generate_gif(episodes, reward, result, frames, path):
     for i, frame in enumerate(frames):
         frames[i] = frame
-    pathname = path + "Episode " + str(episodes) + "  Reward " + str(reward) + ".gif"
+    pathname = path + "Episode " + str(episodes) + "  Reward " + str(reward) + " " + result + " " + ".gif"
     imageio.mimsave(pathname, frames, duration=1 / 60)
 
 
@@ -25,19 +25,19 @@ class ReplayMemory:
         self.batch_size = batch_size
         self.memory_size = memory_size
 
-        self.filenames = {"observations", "actions", "rewards", "done", "count", "current", "states", "new_states",
-                          "indices"}
+        self.file_names = {"observations", "actions", "rewards", "done", "count", "current", "states", "new_states",
+                           "indices"}
 
         if load_memory:
-            for filename in self.filenames:
-                setattr(self, filename, np.load("output/" + filename + ".npy"))
+            for file_name in self.file_names:
+                setattr(self, file_name, np.load("output/" + file_name + ".npy"))
         else:
             self.count = 0
             self.current = 0
 
             # Pre-allocate memory
             self.observations = np.empty((self.memory_size, self.frame_height, self.frame_width), dtype=np.uint8)
-            self.actions = np.empty((self.memory_size, 3), dtype=np.uint8)
+            self.actions = np.empty(self.memory_size, dtype=np.uint8)
             self.rewards = np.empty(self.memory_size, dtype=np.int16)
             self.done = np.empty(self.memory_size, dtype=np.bool)
 
@@ -95,7 +95,7 @@ class ReplayMemory:
 
     # Saves all the replay memory on separate pickle files
     def save_memory(self):
-        for filename in self.filenames:
+        for filename in self.file_names:
             with open("output/" + filename + ".npy", "wb+") as file:
                 np.save(file, getattr(self, filename), allow_pickle=False)
                 self.sync(file)
@@ -108,27 +108,16 @@ class ReplayMemory:
 class ActionGetter:
     """ Returns either a random action or the predicted action from the Q-network based on an annealing value """
 
-    def __init__(self, env, e_start=1, e_end=0.1, replay_memory_start=20000, e_annealing_frames=1000000,
-                 div_list=[1, 3, 9]):
+    def __init__(self, env, e_start=1, e_end=0.1, replay_memory_start=20000, e_annealing_frames=1000000):
         self.env = env
-        self.env_shape = self.env.action_space.nvec
         self.e_start = e_start
         self.e_end = e_end
         self.replay_memory_start = replay_memory_start
         self.e_annealing_frames = e_annealing_frames
-        self.div_list = div_list
 
         # Slopes and intercepts for exploration decrease
         self.slope = -(self.e_start - self.e_end) / self.e_annealing_frames
         self.intercept = self.e_start - self.slope * self.replay_memory_start
-
-    def number_to_list(self, action):
-        result = [0, 0, 0]
-        for i in range(len(self.div_list) - 1, -1, -1):
-            div = action // self.div_list[i]
-            action = action % self.div_list[i]
-            result[i] = div
-        return result
 
     def get_action(self, session, frame_number, dqn, state, evaluation=False):
         if evaluation:
@@ -142,7 +131,7 @@ class ActionGetter:
 
         if np.random.rand(1) < e:
             return self.env.action_space.sample()
-        return self.number_to_list(session.run(dqn.prediction, feed_dict={dqn.input: [state]})[0])
+        return session.run(dqn.prediction, feed_dict={dqn.input: [state]})[0]
 
 
 class PreprocessFrame:
