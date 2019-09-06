@@ -94,13 +94,14 @@ class Environment:
         p1_round_wins = info['p1_round_wins']
         p2_round_wins = info['p2_round_wins']
 
-        if p1_round_wins > self.p1_current_wins:
-            self.p1_current_wins = p1_round_wins
-        if p2_round_wins > self.p2_current_wins:
-            self.p2_current_wins = p2_round_wins
-
         if info['p1_hp'] != 0 and info['p2_hp'] != 0:
             reward = info['p1_hp'] - info['p2_hp']
+
+        if p1_round_wins > self.p1_current_wins:
+            self.p1_current_wins = p1_round_wins
+            reward = 10000
+        if p2_round_wins > self.p2_current_wins:
+            self.p2_current_wins = p2_round_wins
 
         if not evaluation:
             if p1_round_wins == 1 or p2_round_wins == 1:

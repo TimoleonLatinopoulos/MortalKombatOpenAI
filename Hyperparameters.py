@@ -3,7 +3,7 @@ LOAD_MODEL = False
 
 GAME = 'MortalKombat-SNES'
 STATE = 'Level1.SubZeroVsJohnnyCage'
-SCENARIO = 'scenario2'
+SCENARIO = 'scenario'
 FRAME_HEIGHT = 63
 FRAME_WIDTH = 113
 STACKED_FRAMES = 4

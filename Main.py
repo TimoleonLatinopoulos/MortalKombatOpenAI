@@ -25,7 +25,7 @@ with tf.variable_scope('targetDQN'):
     TARGET_DQN = DDQN(n_actions, FRAME_HEIGHT, FRAME_WIDTH, STACKED_FRAMES, LEARNING_RATE)
 
 init = tf.global_variables_initializer()
-saver = tf.train.Saver()
+saver = tf.train.Saver(max_to_keep=None)
 
 MAIN_DQN_VARS = tf.trainable_variables(scope='mainDQN')
 TARGET_DQN_VARS = tf.trainable_variables(scope='targetDQN')
@@ -34,12 +34,14 @@ TARGET_DQN_VARS = tf.trainable_variables(scope='targetDQN')
 with tf.name_scope('Performance'):
     LOSS_PH = tf.placeholder(tf.float32, shape=None, name='loss_summary')
     LOSS_SUMMARY = tf.summary.scalar('loss', LOSS_PH)
+    Q_PH = tf.placeholder(tf.float32, shape=None, name='Q_summary')
+    Q_SUMMARY = tf.summary.scalar('Q_value', Q_PH)
     REWARD_PH = tf.placeholder(tf.float32, shape=None, name='reward_summary')
     REWARD_SUMMARY = tf.summary.scalar('reward', REWARD_PH)
     EVAL_SCORE_PH = tf.placeholder(tf.float32, shape=None, name='evaluation_summary')
     EVAL_SCORE_SUMMARY = tf.summary.scalar('evaluation_score', EVAL_SCORE_PH)
 
-PERFORMANCE_SUMMARIES = tf.summary.merge([LOSS_SUMMARY, REWARD_SUMMARY])
+PERFORMANCE_SUMMARIES = tf.summary.merge([LOSS_SUMMARY, Q_SUMMARY, REWARD_SUMMARY])
 
 
 def learn(session, replay_memory, main_dqn, target_dqn, batch_size, gamma):
@@ -51,11 +53,11 @@ def learn(session, replay_memory, main_dqn, target_dqn, batch_size, gamma):
     double_q = q_vals[range(batch_size), arg_q_max]
 
     target_q = rewards + (gamma * double_q * (1 - done))
-    loss, _ = session.run([main_dqn.loss, main_dqn.update],
-                          feed_dict={main_dqn.input: states,
-                                     main_dqn.target_q: target_q,
-                                     main_dqn.action: actions})
-    return loss
+    loss, q, _ = session.run([main_dqn.loss, main_dqn.Q, main_dqn.update],
+                             feed_dict={main_dqn.input: states,
+                                        main_dqn.target_q: target_q,
+                                        main_dqn.action: actions})
+    return loss, q
 
 
 def train():
@@ -69,11 +71,11 @@ def train():
         if LOAD_MODEL:
             my_replay_memory = ReplayMemory(FRAME_HEIGHT, FRAME_WIDTH, STACKED_FRAMES, BATCH_SIZE, MEMORY_SIZE, True)
             print("Memory Loaded.")
-            saver.restore(sess, SAVER + 'model' + SAVED_FILE_NAME)
-            print("Model restored.")
             with open("last_frame.dat") as file:
                 frame_number = int(file.readline())
                 episodes = int(file.readline())
+            saver.restore(sess, SAVER + 'model_' + str(episodes) + SAVED_FILE_NAME)
+            print("Model restored.")
         else:
             my_replay_memory = ReplayMemory(FRAME_HEIGHT, FRAME_WIDTH, STACKED_FRAMES, BATCH_SIZE, MEMORY_SIZE)
             sess.run(init)
@@ -82,6 +84,7 @@ def train():
             episodes = 0
         rewards = []
         loss_list = []
+        q_list = []
 
         while episodes < MAX_EPISODES:
             epoch_episodes = 0
@@ -101,8 +104,9 @@ def train():
 
                     if frame_number > REPLAY_MEMORY_START:
                         if frame_number % STACKED_FRAMES == 0:
-                            loss = learn(sess, my_replay_memory, MAIN_DQN, TARGET_DQN, BATCH_SIZE, GAMMA)
+                            loss, q = learn(sess, my_replay_memory, MAIN_DQN, TARGET_DQN, BATCH_SIZE, GAMMA)
                             loss_list.append(loss)
+                            q_list.append(q)
                         if frame_number % UPDATE_FRAMES == 0:
                             network_updater.update_networks(sess)
                     if done:
@@ -118,9 +122,12 @@ def train():
                     # Scalar summaries for tensorboard
                     if frame_number > REPLAY_MEMORY_START:
                         summ = sess.run(PERFORMANCE_SUMMARIES,
-                                        feed_dict={LOSS_PH: np.mean(loss_list), REWARD_PH: np.mean(rewards)})
+                                        feed_dict={LOSS_PH: np.mean(loss_list),
+                                                   Q_PH: np.mean(q_list),
+                                                   REWARD_PH: np.mean(rewards)})
                         WRITER.add_summary(summ, episodes)
                         loss_list = []
+                        q_list = []
 
                     print(episodes, frame_number, np.mean(rewards))
                     with open('rewards.dat', 'a') as reward_file:
@@ -138,7 +145,7 @@ def train():
                 if done:
                     snes.reset(sess, STACKED_FRAMES)
                     reward_sum = 0
-				
+
                 action = action_getter.get_action(sess, frame_number, MAIN_DQN, snes.state, evaluation=True)
                 processed_observation, observation, info, reward, done = snes.step(sess, action, info, evaluation=True)
 
@@ -154,9 +161,7 @@ def train():
             # Save the network parameters
             if p1_round_wins == 2:
                 result = "Win"
-                save_path = saver.save(sess, SAVER + 'model_success_' + str(episodes) + SAVED_FILE_NAME)
-            else:
-                save_path = saver.save(sess, SAVER + 'model' + SAVED_FILE_NAME)
+            save_path = saver.save(sess, SAVER + 'model_' + str(episodes) + SAVED_FILE_NAME)
             print("Model saved in path: {}".format(save_path))
 
             try:
@@ -184,7 +189,7 @@ def test():
     action_getter = ActionGetter(snes.env, E_START, E_END, REPLAY_MEMORY_START, E_ANNEALING_FRAMES)
 
     with tf.Session() as sess:
-        saver.restore(sess, SAVER + 'model' + SAVED_FILE_NAME)
+        saver.restore(sess, SAVER + 'model_16000' + SAVED_FILE_NAME)
         print("Model restored.")
 
         frames_for_gif = []
